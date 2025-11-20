@@ -8,74 +8,70 @@ from flask import Flask, request, Response
 from botbuilder.core import BotFrameworkAdapterSettings, BotFrameworkAdapter, TurnContext
 from botbuilder.schema import Activity
 
-# Load environment variables
+# Load env vars
 load_dotenv()
 
-# Credentials and keys
+# Azure Bot credentials
 APP_ID = os.getenv("MicrosoftAppId", "")
 APP_PASSWORD = os.getenv("MicrosoftAppPassword", "")
+
+# Azure OpenAI config
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 ASSISTANT_ID = os.getenv("ASSISTANT_ID")
 
-# Configure OpenAI Azure API
 openai.api_type = "azure"
 openai.api_version = "2024-05-01-preview"
 openai.api_key = AZURE_OPENAI_API_KEY
 openai.azure_endpoint = AZURE_OPENAI_ENDPOINT.rstrip("/")
 
-# Flask & Bot setup
+# Flask + Bot Framework
 app = Flask(__name__)
 adapter_settings = BotFrameworkAdapterSettings(APP_ID, APP_PASSWORD)
 adapter = BotFrameworkAdapter(adapter_settings)
 
-# Simple memory store for user threads
+# Memory map for OpenAI threads
 thread_map = {}
 
-
 async def handle_message(turn_context: TurnContext):
-    # Send greeting only when bot is added to conversation
+    # Greeting on bot added
     if turn_context.activity.type == "conversationUpdate":
-        members_added = turn_context.activity.members_added
-        if members_added:
-            for member in members_added:
-                # Greet when the bot itself is added, not others
-                if member.id == turn_context.activity.recipient.id:
-                    await turn_context.send_activity("Hello! How can I assist you today?")
+        for member in turn_context.activity.members_added:
+            if member.id == turn_context.activity.recipient.id:
+                await turn_context.send_activity("Hello! How can I assist you today?")
         return
 
-    # Only handle real messages with non-empty text
-    if turn_context.activity.type != "message" or not turn_context.activity.text or not turn_context.activity.text.strip():
+    # Ignore non-text events
+    if turn_context.activity.type != "message" or not turn_context.activity.text:
         return
 
     user_id = turn_context.activity.from_property.id
-    user_input = turn_context.activity.text
+    user_input = turn_context.activity.text.strip()
 
     try:
-        # Show typing indicator immediately
         await turn_context.send_activity(Activity(type="typing"))
 
-        # Get or create thread ID for user
+        # Thread handling
         thread_id = thread_map.get(user_id)
         if not thread_id:
             thread = openai.beta.threads.create()
             thread_id = thread.id
             thread_map[user_id] = thread_id
 
-        # Add user message to assistant thread
+        # Add user message
         openai.beta.threads.messages.create(
             thread_id=thread_id,
             role="user",
             content=user_input
         )
 
-        # Start a new assistant run
+        # Run assistant
         run = openai.beta.threads.runs.create(
             assistant_id=ASSISTANT_ID,
             thread_id=thread_id
         )
 
-        # Poll until run completes/fails/cancelled
+        # Poll for completion
         while run.status not in ["completed", "failed", "cancelled"]:
             time.sleep(1)
             run = openai.beta.threads.runs.retrieve(
@@ -83,32 +79,26 @@ async def handle_message(turn_context: TurnContext):
                 run_id=run.id
             )
 
-        # Get last assistant message from the thread messages
+        # Get latest assistant message
         messages = openai.beta.threads.messages.list(thread_id=thread_id)
         assistant_reply = None
-        for message in messages.data:
+
+        for message in reversed(messages.data):
             if message.role == "assistant":
                 assistant_reply = message.content[0].text.value
                 break
 
         if not assistant_reply:
-            assistant_reply = "Sorry, I didn't get a reply from the assistant."
+            assistant_reply = "Sorry, I couldn't generate a response."
 
     except Exception as e:
-        logging.error(f"Error handling message: {e}")
+        logging.error(f"Error: {e}")
         assistant_reply = "Something went wrong."
 
-    # Send the full reply after complete processing
     await turn_context.send_activity(Activity(
         type="message",
-        text=assistant_reply,
-        recipient=turn_context.activity.from_property,
-        from_property=turn_context.activity.recipient,
-        conversation=turn_context.activity.conversation,
-        channel_id=turn_context.activity.channel_id,
-        service_url=turn_context.activity.service_url
+        text=assistant_reply
     ))
-
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
@@ -129,11 +119,9 @@ def messages():
         logging.error(f"Exception in /api/messages: {e}")
         return Response("Internal Server Error", status=500)
 
-
 @app.route("/", methods=["GET"])
-def health_check():
-    return "Teams Bot is running."
-
+def root():
+    return "Bot is running (single-tenant test)."
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
