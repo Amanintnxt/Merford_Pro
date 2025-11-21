@@ -14,13 +14,10 @@ load_dotenv()
 # Credentials and keys
 APP_ID = os.getenv("MicrosoftAppId", "")
 APP_PASSWORD = os.getenv("MicrosoftAppPassword", "")
-TENANT_ID = os.getenv("AZURE_AD_TENANT_ID", "")
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 ASSISTANT_ID = os.getenv("ASSISTANT_ID")
 
-# Construct the tenant-specific authority URL for single-tenant auth
-AAD_AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}" if TENANT_ID else None
 
 # Configure OpenAI Azure API
 openai.api_type = "azure"
@@ -30,8 +27,7 @@ openai.azure_endpoint = AZURE_OPENAI_ENDPOINT.rstrip("/")
 
 # Flask & Bot setup
 app = Flask(__name__)
-adapter_settings = BotFrameworkAdapterSettings(
-    APP_ID, APP_PASSWORD, aad_authority=AAD_AUTHORITY)
+adapter_settings = BotFrameworkAdapterSettings(APP_ID, APP_PASSWORD)
 adapter = BotFrameworkAdapter(adapter_settings)
 
 # Simple memory store for user threads
@@ -137,7 +133,7 @@ def messages():
 
 @app.route("/", methods=["GET"])
 def health_check():
-    return "Teams Bot is running with tenant id."
+    return "Teams Bot is running."
 
 
 if __name__ == "__main__":
