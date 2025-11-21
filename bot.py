@@ -135,6 +135,7 @@ def health_check():
     return "Teams Bot is running."
 
 
+# -------------------- MAIN --------------------
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logger.info("🚀 Bot starting...")
     app.run(host="0.0.0.0", port=3978)
